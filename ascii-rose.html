@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>A rose, in symbols</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;background:#000;color:#a49aa1;overflow:hidden}body{font-family:ui-monospace,SFMono-Regular,Consolas,'Liberation Mono',monospace;overscroll-behavior:none}main{position:relative;width:100%;height:100%;height:100svh;display:block}canvas{position:absolute;inset:0;display:block;width:100%;height:100%;min-width:0;min-height:0;object-fit:contain}main:after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent,transparent 3px,#00000012 4px);opacity:.45}.toolbar{position:absolute;z-index:2;bottom:max(13px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:6px;padding:7px 9px;border:1px solid #ffffff13;border-radius:9px;background:#080609d9;opacity:.5;transition:opacity .25s;max-width:calc(100% - 24px)}.toolbar:hover,.toolbar:focus-within,body.awake .toolbar{opacity:1}button{font:inherit;font-size:11px;background:transparent;color:#c5b5c0;border:0;border-radius:5px;min-height:32px;padding:4px 10px;white-space:nowrap;cursor:pointer}button:hover{background:#ff78b51a;color:#ff9dc8}button:focus-visible,input:focus-visible{outline:1px solid #fb80b8;outline-offset:3px}input{width:100px;min-width:40px;accent-color:#d86c9b;cursor:pointer}#speed{min-width:42px}#help{position:absolute;z-index:2;top:max(16px,env(safe-area-inset-top));left:18px;font-size:10px;color:#776774;opacity:0;transition:opacity .5s;pointer-events:none}body.awake #help{opacity:.85}@media(max-width:420px){button{padding:4px 7px;font-size:10px}.toolbar{gap:2px}input{width:70px}}@media(prefers-reduced-motion:reduce){.toolbar{transition:none}main:after{display:none}}
+</style>
+</head>
+<body>
+<main aria-label="An animated rose made entirely of glowing text characters, with a field of twinkling ASCII stars.">
+<canvas id="art" role="img" aria-label="A pink ASCII rose blooms above a green stem and leaves against a black starfield."></canvas>
+<div id="help">a rose, in symbols · space to pause · R to replay</div>
+<div class="toolbar" aria-label="Animation controls">
+<button id="play" aria-label="Pause animation">Pause</button><button id="replay" aria-label="Replay the blooming animation">↺ Replay</button>
+<input id="seek" type="range" min="0" max="20" value="0" step=".01" aria-label="Animation position in seconds">
+<button id="speed" aria-label="Change playback speed">1×</button><button id="full" aria-label="Enter fullscreen">⛶</button>
+</div>
+</main>
+<script>
+'use strict';
+// Self-contained: the rose is geometry rasterized into colored monospace glyphs.
+// No images, videos, fonts, libraries, or network requests are needed.
+const canvas=document.getElementById('art'),ctx=canvas.getContext('2d',{alpha:false});
+const $=id=>document.getElementById(id),TAU=Math.PI*2,W=1100,H=1040,CW=8.1,CH=14.1,COLS=Math.ceil(W/CW),ROWS=Math.ceil(H/CH);
+const N=COLS*ROWS,depth=new Float32Array(N),shade=new Float32Array(N),kind=new Uint8Array(N),edge=new Uint8Array(N);
+const buffer=document.createElement('canvas');buffer.width=W;buffer.height=H;const ink=buffer.getContext('2d');
+let lastPaint=0;let t=0,last=0,playing=!matchMedia('(prefers-reduced-motion: reduce)').matches,speed=1,raf=0,shownCount=0;
+if(!playing)t=16;
+let seed=2718;function rand(){seed=(seed*1664525+1013904223)>>>0;return seed/4294967296}
+const stars=Array.from({length:170},()=>({x:rand()*W,y:rand()*H,p:rand()*TAU,s:.5+rand()*1.6,c:rand(),f:.4+rand()*1.3}));
+const sparkles=Array.from({length:13},()=>({x:rand()*W,y:rand()*(H-100)+40,p:rand()*TAU,s:10+rand()*32}));
+const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
+function smooth(a,b,x){let q=clamp((x-a)/(b-a));return q*q*(3-2*q)}
+const mix=(a,b,p)=>a+(b-a)*p;
+function stemX(y){return .045*Math.sin(y*2.3)+.025*y}
+let yaw=0,grow=0,bloom=0;
+function project(p){let [x,y,z]=p;const c=Math.cos(yaw),s=Math.sin(yaw),xx=x*c+z*s,zz=z*c-x*s;return [(W*.5+xx*192)/CW,(H*.55-y*180+zz*57)/CH,zz-.32*y]}
+function tri(a,b,c,type){
+ const ux=b[0]-a[0],uy=b[1]-a[1],uz=b[2]-a[2],vx=c[0]-a[0],vy=c[1]-a[1],vz=c[2]-a[2];
+ let nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx,nn=Math.hypot(nx,ny,nz)||1;
+ let lit=.18+.82*Math.abs((nx*-.38+ny*.72+nz*-.58)/nn);
+ if(type===1)lit*=((a[3]??1)+(b[3]??1)+(c[3]??1))/3;
+ a=project(a);b=project(b);c=project(c);
+ let area=(b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);if(Math.abs(area)<.00001)return;
+ const xmin=Math.max(0,Math.floor(Math.min(a[0],b[0],c[0]))),xmax=Math.min(COLS-1,Math.ceil(Math.max(a[0],b[0],c[0])));
+ const ymin=Math.max(0,Math.floor(Math.min(a[1],b[1],c[1]))),ymax=Math.min(ROWS-1,Math.ceil(Math.max(a[1],b[1],c[1])));
+ for(let y=ymin;y<=ymax;y++)for(let x=xmin;x<=xmax;x++){
+ const px=x+.5,py=y+.5,w1=((b[0]-px)*(c[1]-py)-(b[1]-py)*(c[0]-px))/area,w2=((c[0]-px)*(a[1]-py)-(c[1]-py)*(a[0]-px))/area,w3=1-w1-w2;
+ if(w1<0||w2<0||w3<0)continue;let z=w1*a[2]+w2*b[2]+w3*c[2],i=y*COLS+x;
+ if(z<depth[i]){depth[i]=z;shade[i]=lit;kind[i]=type;edge[i]=Math.min(w1,w2,w3)<.075?1:0}
+ }
+}
+function surface(fn,nu,nv,type){let prev=Array.from({length:nu+1},(_,i)=>fn(i/nu,0));for(let j=1;j<=nv;j++){let cur=Array.from({length:nu+1},(_,i)=>fn(i/nu,j/nv));for(let i=0;i<nu;i++){tri(prev[i],cur[i],cur[i+1],type);tri(prev[i],cur[i+1],prev[i+1],type)}prev=cur}}
+function rose(){
+ grow=smooth(0,4,t);bloom=smooth(4,16,t);yaw=.13+Math.sin(Math.max(0,t-7)*.33)*.12*smooth(7,13,t);
+ // A tapered, slightly curved stem grows from the bottom upward.
+ surface((u,v)=>{let y=-2.12+3.05*v*grow,a=u*TAU,r=.046+.02*v;return [stemX(y)+r*Math.cos(a),y,r*Math.sin(a)]},9,25,2);
+ // Leaves: a folded central vein, cupped blade, pointed ends.
+ for(const [side,base,start]of [[-1,-1.18,1.4],[1,-.48,2.1]]){let q=smooth(start,start+3,t);if(q<.001)continue;
+ surface((u,v)=>{let len=1.03*q,x=stemX(base)+side*v*len,w=Math.pow(Math.sin(Math.PI*v),.83)*.34*q;
+ return [x,base+v*.43*q+(u-.5)*2*w*(.72+.28*q),.06+(u-.5)*2*w*.75+Math.sin(v*Math.PI)*.12-Math.abs(u-.5)*.12]},16,24,2);
+ }
+ if(grow<.7)return;
+ const by=-2.12+3.05*grow;
+ // Five small sepals, curling away as the bud opens.
+ for(let k=0;k<5;k++){let a=k*TAU/5;surface((u,v)=>{let r=.07+v*(.28+.19*bloom),w=Math.sin(v*Math.PI)*.075*(2*u-1);return [stemX(by)+Math.sin(a)*r+Math.cos(a)*w,by+.23-v*(.13+.23*bloom),Math.cos(a)*r-Math.sin(a)*w]},4,9,2)}
+ // Overlapping petal whorls. Each petal unfurls from a narrow bud into a broad cup.
+ const rings=[{n:7,r:1.32,h:1.04,width:1.24,off:.3,delay:0},{n:6,r:.98,h:1.25,width:1.38,off:.83,delay:.08},{n:5,r:.65,h:1.37,width:1.55,off:.2,delay:.2},{n:4,r:.37,h:1.4,width:1.85,off:.71,delay:.35}];
+ rings.forEach((ring,l)=>{let opening=smooth(ring.delay,1,bloom);for(let k=0;k<ring.n;k++){
+ const a0=k*TAU/ring.n+ring.off;
+ surface((u,v)=>{let w=2*u-1,spread=Math.sin(v*Math.PI*.5),a=a0+w*ring.width*.5*spread+.16*Math.sin(v*Math.PI);
+ let radius=mix(.13+.13*l/4,ring.r,opening)*Math.pow(v,.77);
+ radius+=Math.sin(v*Math.PI)*(.14+.15*opening)*(1-w*w);
+ // Rounded lobes, rolled rims, and a little asymmetry keep the silhouette organic.
+ radius*=1-.18*Math.pow(Math.abs(w),3);
+ let y=by+.04+ring.h*v-(.24+.17*opening)*Math.pow(Math.abs(w),2)*Math.pow(v,3);
+ y-=opening*.33*Math.pow(v,4)*(l===0?1:.4);
+ y+=.055*Math.sin(a0*3+w*4)*v*v;
+ radius+=.065*opening*Math.sin(v*Math.PI*2+w*1.7)*Math.sin(v*Math.PI);
+ return [stemX(by)+radius*Math.sin(a),y,radius*Math.cos(a),.55+.45*Math.pow(v,5)+.22*Math.sin(u*Math.PI)];
+ },18,19,1);
+ }});
+}
+const symbols='.-:=+trvxzjfnuaeoq0088$$%%BB@';
+function field(time){
+ ink.fillStyle='#000';ink.fillRect(0,0,W,H);ink.font='12px "Courier New",monospace';ink.textAlign='center';
+ for(const s of stars){const pulse=.16+.7*Math.pow(.5+.5*Math.sin(time*s.f+s.p),3);ink.globalAlpha=pulse;ink.fillStyle=s.c<.15?'#ed91bc':s.c<.35?'#9ebed5':'#d6d9dc';ink.shadowColor=ink.fillStyle;ink.shadowBlur=s.s>1.5?5:1;ink.fillText(s.s>1.65?'✦':s.s>1.1?'+':s.s>.8?'*':'.',s.x,s.y)}
+ ink.shadowBlur=0;
+ for(const s of sparkles){let pulse=Math.pow(Math.max(0,Math.sin(time*.7+s.p)),8);if(pulse<.015)continue;
+ ink.globalAlpha=pulse*.38;ink.fillStyle='#c4cdd5';ink.font='13px "Courier New",monospace';
+ let x=s.x+Math.sin(time*.13+s.p)*15,y=s.y;for(let i=-3;i<=3;i++){if(i)ink.fillText('|',x,y+i*12);ink.fillText(i?'—':'*',x+i*9,y);if(i){ink.fillText('/',x+i*5,y-i*10);ink.fillText('\\',x+i*5,y+i*10)}}
+ ink.globalAlpha=pulse*.9;ink.shadowColor='#e7f4ff';ink.shadowBlur=9;ink.fillText('*',x,y);ink.shadowBlur=0;
+ }
+ ink.globalAlpha=1;
+}
+function render(){
+ depth.fill(Infinity);kind.fill(0);shade.fill(0);rose();field(t);shownCount=0;
+ ink.font='13.2px "Courier New",monospace';ink.textAlign='left';ink.textBaseline='alphabetic';
+ // A muted trailing stem gives the terminal a faint phosphor persistence.
+ ink.globalAlpha=.055;ink.fillStyle='#4ba66d';for(let y=64;y<73;y++)ink.fillText('|x|',W/2-8,y*CH);ink.globalAlpha=1;
+ for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){let i=y*COLS+x;if(!kind[i])continue;shownCount++;
+ let light=shade[i],hash=((x*17+y*31)%23)/23,contour=(x===0||!kind[i-1]||x===COLS-1||!kind[i+1]||y===0||!kind[i-COLS]||y===ROWS-1||!kind[i+COLS]);
+ let ch=symbols[Math.floor(clamp(light*.46+hash*.54)* (symbols.length-1))];
+ if(contour)ch=y>0&&!kind[i-COLS]?'_':x>0&&!kind[i-1]?'/':x<COLS-1&&!kind[i+1]?'\\':'-';
+ let color;if(kind[i]===1){let lum=.48+light*.6;color=`rgb(${Math.round(230*lum)},${Math.round((51+hash*37)*lum)},${Math.round((104+hash*28)*lum)})`}else{let lum=.63+light*.37;color=`rgb(${Math.round(65*lum)},${Math.round((148+hash*58)*lum)},${Math.round(99*lum)})`}
+ ink.fillStyle=color;ink.fillText(ch,x*CW,(y+1)*CH);
+ }
+ // Bloom/glow is applied to the text layer as a whole, without expensive per-glyph shadows.
+ ctx.setTransform(canvas.width/W,0,0,canvas.height/H,0,0);ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);ctx.drawImage(buffer,0,0);
+ ctx.globalCompositeOperation='screen';ctx.globalAlpha=.31;ctx.filter='blur(3px)';ctx.drawImage(buffer,0,0);ctx.filter='none';ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';
+ ctx.font='15px "Courier New",monospace';ctx.fillStyle='#d77aab';ctx.textAlign='right';ctx.fillText('• t '+t.toFixed(2).padStart(5,'0')+'s',W-44,46);
+ ctx.textAlign='left';ctx.fillStyle='#66606b';ctx.font='14px "Courier New",monospace';ctx.fillText('a rose, in symbols',46,H-96);ctx.fillText('bloom '+(bloom*100).toFixed(1)+'%   sway '+((yaw*180/Math.PI+360)%360).toFixed(2)+'°',46,H-72);ctx.fillText('letters '+shownCount.toLocaleString('en-US'),46,H-48);
+ $('seek').value=t;
+}
+function resize(){const dpr=Math.min(devicePixelRatio||1,2),r=canvas.getBoundingClientRect();const scale=Math.min(r.width/W,r.height/H);canvas.width=Math.round(W*scale*dpr);canvas.height=Math.round(H*scale*dpr);render()}
+function frame(now){if(now-lastPaint<33){raf=requestAnimationFrame(frame);return}lastPaint=now;if(!last)last=now;let dt=Math.min((now-last)/1000,.1);last=now;if(playing)t+=dt*speed;if(t>20)t=16+(t-20)%4;if(playing)render();raf=requestAnimationFrame(frame)}
+function sync(){ $('play').textContent=playing?'Pause':'Play';$('play').setAttribute('aria-label',playing?'Pause animation':'Play animation'); }
+$('play').onclick=()=>{playing=!playing;sync()};$('replay').onclick=()=>{t=0;playing=true;sync()};$('seek').addEventListener('input',()=>{t=Number($('seek').value);render()});
+$('speed').onclick=()=>{speed=speed===1?2:speed===2?.5:1;$('speed').textContent=speed+'×'};
+$('full').onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else if(document.documentElement.requestFullscreen)await document.documentElement.requestFullscreen();else{$('full').textContent='—';$('full').title='Fullscreen is not available in this browser'}}catch(e){$('full').title='Fullscreen is not available in this browser'}};
+let awakeTimer;function wake(){document.body.classList.add('awake');clearTimeout(awakeTimer);awakeTimer=setTimeout(()=>document.body.classList.remove('awake'),2800)}
+document.addEventListener('pointerdown',wake);document.addEventListener('keydown',e=>{if(e.target.matches('input,button'))return;if(e.code==='Space'){e.preventDefault();$('play').click()}if(e.key.toLowerCase()==='r')$('replay').click();wake()});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){cancelAnimationFrame(raf);last=0}else{last=0;raf=requestAnimationFrame(frame)}});
+window.addEventListener('resize',resize);sync();resize();wake();raf=requestAnimationFrame(frame);
+</script>
+</body>
+</html>
